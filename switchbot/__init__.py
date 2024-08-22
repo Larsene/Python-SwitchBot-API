@@ -4,7 +4,6 @@ It simple handles requesting credential.
 """
 
 import hashlib
-import keyword
 import time
 from decouple import config as decoupleconfig
 from requests import Session
@@ -12,7 +11,7 @@ from uuid import uuid4
 import base64
 import hmac
 
-from exceptions import APIError
+from .exceptions import APIError
 
 ENDPOINT = 'https://api.switch-bot.com'
 VERSION = 'v1.1'
@@ -32,20 +31,20 @@ class SwitchBot:
     ):
         
         """
-                Creates a new Switchbot API client.
-                
-                 The ``endpoint`` identifies the switchbot api endpoint
-                 ``application_token`` is the token provided by the app in developper mode
-                 ``application_secret``authenticates it
-                 ``timeout`` is the request timeout
-        
-                 if the values are not provided, we will to load them from the .env file
-                 or environnement variables, or use defaults values ENDPOINT, VERSION, TIMEOUT
-                 
-                 :param str endpoint: API endpoint to connect
-                 :param str api_version: the version of the API to connect
-                 :param str application_token: the token provided by switchbot
-                 :param str application_secret: API secret as provided by Switchbot
+            Creates a new Switchbot API client.
+            
+             The ``endpoint`` identifies the switchbot api endpoint
+             ``application_token`` is the token provided by the app in developper mode
+             ``application_secret``authenticates it
+             ``timeout`` is the request timeout
+    
+             if the values are not provided, we will to load them from the .env file
+             or environnement variables, or use defaults values ENDPOINT, VERSION, TIMEOUT
+             
+             :param str endpoint: API endpoint to connect
+             :param str api_version: the version of the API to connect
+             :param str application_token: the token provided by switchbot
+             :param str application_secret: API secret as provided by Switchbot
         
         """
         # load endpoint
@@ -70,7 +69,7 @@ class SwitchBot:
         
         # timeout
         if timeout is None:
-            timeout = decoupleconfig('TIMEOUT', cast=str, default=TIMEOUT)
+            timeout = decoupleconfig('TIMEOUT', cast=int, default=TIMEOUT)
         self.timeout = timeout        
         
         # use a requests session
@@ -92,29 +91,37 @@ class SwitchBot:
         return self.call("GET", _target, None)
     
     
-    def post(self, _target, **kwargs):
+    def post(self, _target, json=None):
         """ 'POST' wrapper
         
         :param string _target: API method to call
         """
-        if not kwargs:
-            kwargs = None
-        
-        return self.call("POST", _target, None)    
+        return self.call("POST", _target, json)    
     
+    
+    def execute(self, device, json_param=None):
+        """ Snippet to send an order to a device
+        
+        :param str device: device to order
+        :param dict json_param: order parameters to send
+        """
+        _target = f"devices/{device}/commands"
+        
+        return self.call("POST", _target, json=json_param)        
 
-    def call(self, method, path, data=None):
+
+    def call(self, method, path, json=None):
         """
         Low level call helper.
     
         :param str method: HTTP verb. Usually one of GET, POST, PUT, DELETE
         :param str path: api entrypoint to call, relative to endpoint base path
-        :param data: any json serializable data to send as request's body
+        :param json: any dist json serializable data to send as request
         :raises APIError: when request failed
         """
         # attempt request
         try:
-            result = self.raw_call(method=method, path=path, data=data)
+            result = self.raw_call(method=method, path=path, json=json)
         except Exception as error:
             raise APIError("Low HTTP request failed error", error)
     
@@ -130,8 +137,10 @@ class SwitchBot:
             raise APIError("Failed to decode API response", error)
     
         # error check
-        if status >= 100 and status < 300:
+        if status == 200 and json_result['statusCode'] == 100:
             return json_result
+        elif json_result['statusCode'] != 100:
+            raise APIError(f"Error {json_result['statusCode']}: {json_result['message']}", request=result)
         elif status == 400:
             raise APIError("Bad Request", error)
         elif status == 401:
@@ -154,15 +163,14 @@ class SwitchBot:
             raise APIError(json_result.get("message"), response=result)
 
 
-    def raw_call(self, method, path, data=None):
+    def raw_call(self, method, path, json=None):
         """ low level call helper, include headers authentication
         
         :param str method: GET, POST, PUT, DELETE
         :param str path: api entrypoint relative to endpoint base path
-        :param data: any json serializable data to send as request's body
+        :param json: any dict of json parameters to send
         """
         target = self.endpoint + '/' + self.api_version +'/' + path
-        
         # generation headers params
         nonce = uuid4()
         t = int(round(time.time() * 1000))
@@ -184,4 +192,6 @@ class SwitchBot:
             'nonce': str(nonce),
         }
                 
-        return self._session.request(method, target, headers=apiHeader, timeout=self.timeout)
+        return self._session.request(method, target, headers=apiHeader, json=json, timeout=self.timeout)
+    
+    
